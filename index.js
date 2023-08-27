@@ -26,6 +26,7 @@ function inject (bot) {
   let digging = false
   let placing = false
   let placingBlock = null
+  let openingBlock = null
   let lastNodeTime = performance.now()
   let returningPos = null
   let stopPathing = false
@@ -168,11 +169,25 @@ function inject (bot) {
   function postProcessPath (path) {
     for (let i = 0; i < path.length; i++) {
       const curPoint = path[i]
-      if (curPoint.toBreak.length > 0 || curPoint.toPlace.length > 0) break
       const b = bot.blockAt(new Vec3(curPoint.x, curPoint.y, curPoint.z))
-      if (b && (b.type === waterType || ((b.type === ladderId || b.type === vineId) && i + 1 < path.length && path[i + 1].y < curPoint.y))) {
+      if (b) {
+        const properties = b.getProperties()
+        if (properties.open != null) {
+          curPoint.x = Math.floor(curPoint.x) + 0.5
+          curPoint.y = Math.floor(curPoint.y)
+          curPoint.z = Math.floor(curPoint.z) + 0.5
+          continue
+        }
+      }
+      if (b && (b.type === waterType)) {
         curPoint.x = Math.floor(curPoint.x) + 0.5
         curPoint.y = Math.floor(curPoint.y)
+        curPoint.z = Math.floor(curPoint.z) + 0.5
+        continue
+      }
+      if (b && ((b.type === ladderId || b.type === vineId) && (i + 1 < path.length) && (path[i + 1].y < curPoint.y))) {
+        curPoint.x = Math.floor(curPoint.x) + 0.5
+        // curPoint.x = Math.floor(curPoint.y)
         curPoint.z = Math.floor(curPoint.z) + 0.5
         continue
       }
@@ -454,6 +469,20 @@ function inject (bot) {
       }
       return
     }
+
+    if (nextPoint.toOpen.length > 0) {
+      openingBlock = nextPoint.toOpen.shift()
+      // Open gates or doors
+      if (!lockUseBlock.tryAcquire()) return
+      bot.activateBlock(bot.blockAt(new Vec3(openingBlock.x, openingBlock.y, openingBlock.z))).then(() => {
+        lockUseBlock.release()
+        lastNodeTime = performance.now()
+      }, err => {
+        console.error(err)
+        lockUseBlock.release()
+      })
+      return
+    }
     // Handle block placement
     // TODO: sneak when placing or make sure the block is not interactive
     if (placing || nextPoint.toPlace.length > 0) {
@@ -463,18 +492,6 @@ function inject (bot) {
         fullStop()
       }
 
-      // Open gates or doors
-      if (placingBlock?.useOne) {
-        if (!lockUseBlock.tryAcquire()) return
-        bot.activateBlock(bot.blockAt(new Vec3(placingBlock.x, placingBlock.y, placingBlock.z))).then(() => {
-          lockUseBlock.release()
-          placingBlock = nextPoint.toPlace.shift()
-        }, err => {
-          console.error(err)
-          lockUseBlock.release()
-        })
-        return
-      }
       const block = stateMovements.getScaffoldingItem()
       if (!block) {
         resetPath('no_scaffolding_blocks')
